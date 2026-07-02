@@ -629,7 +629,7 @@ export default function TheScentAtelier() {
               className="bg-zinc-900 max-w-5xl w-full rounded-3xl overflow-hidden flex flex-col md:flex-row my-6" onClick={e => e.stopPropagation()}>
               <div className="md:w-5/12 bg-black relative min-h-[240px] flex flex-col">
                 <div className="relative flex-1 min-h-[240px]">
-                  <img src={selectedProduct.image || '/images/noir-oud.jpg'} alt={selectedProduct.name} className="w-full h-full object-cover absolute inset-0" />
+                  <img src={selectedProduct.image || '/images/noir-oud.jpg'} alt={selectedProduct.name} className="w-full h-full object-contain absolute inset-0" />
                 </div>
                 {(selectedProduct.images?.length ?? 0) > 1 && (
                   <div className="flex gap-2 p-3 bg-black overflow-x-auto">
