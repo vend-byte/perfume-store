@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --gold: #d4af77;
+    --dark: #121212;
+    --cream: #f5f0e6;
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 96px;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.serif-heading {
+  font-family: 'Playfair Display', serif;
+}
+
+.luxury-card {
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.luxury-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+}
+
+.gold-text {
+  color: #d4af77;
+}
+
+.floating-whatsapp {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+/* Perfume specific styles */
+.perfume-note {
+  position: relative;
+}
+
+.perfume-note::before {
+  content: '•';
+  color: #d4af77;
+  margin-right: 8px;
+}
+
+/* Cart slide in animation */
+.slide-in {
+  animation: slideIn 0.4s ease-out forwards;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
