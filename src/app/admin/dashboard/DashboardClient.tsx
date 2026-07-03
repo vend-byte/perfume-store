@@ -1,17 +1,20 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Plus, Edit2, Trash2, Upload, Save, LogOut, X, Pin, Check, EyeOff, MessageSquare } from 'lucide-react';
+import { Edit2, Trash2, LogOut, Pin, Check, EyeOff, MessageSquare, Plus } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import LiveComments from '@/components/LiveComments';
 import CatalogTab, { type Taxonomies } from './CatalogTab';
+import ProductForm, { emptyProductForm, type ProductFormValues } from '@/components/admin/ProductForm';
 
 interface Size { label: string; price: number; discountPrice?: number | null; stock: number; weight?: string; }
 interface Product {
-  id: number; code: string; name: string; brand: string; category: string; gender: string;
+  id: number; code: string; slug: string; name: string; brand: string; category: string; gender: string;
   fragranceFamily: string; description: string; topNotes: string; middleNotes: string;
-  baseNotes: string; image: string; images: string[]; video: string; status: string; views: number; sizes: Size[];
+  baseNotes: string; concentration: string; longevity: string; sillage: string; season: string; occasion: string;
+  image: string; images: string[]; video: string; status: string; draft: boolean; views: number; sizes: Size[];
   categoryId: number | null; brandId: number | null; familyIds: number[]; collectionIds: number[];
+  seoTitle: string; seoDescription: string; metaKeywords: string;
 }
 interface Order {
   id: number; code: string; name: string; phone: string; email: string; address: string;
@@ -24,7 +27,6 @@ interface Review {
 }
 
 const ORDER_STATUSES = ['Pending', 'Confirmed', 'Processing', 'Packed', 'Ready for Dispatch', 'Out for Delivery', 'Delivered', 'Cancelled', 'Refunded'];
-const PRODUCT_STATUSES = ['In Stock', 'Out of Stock', 'Coming Soon', 'Best Seller', 'Featured', 'Flash Sale', 'Limited Edition', 'New Arrival'];
 const TABS = ['Dashboard', 'Products', 'Catalog', 'Orders', 'Reviews', 'Comments', 'Settings'] as const;
 type Tab = (typeof TABS)[number];
 
@@ -43,16 +45,30 @@ const TOGGLES: [string, string][] = [
   ['maintenanceMode', 'Maintenance Mode'],
 ];
 
-const emptyForm = {
-  name: '', brand: '', category: '', gender: 'Unisex', fragranceFamily: '', description: '',
-  topNotes: '', middleNotes: '', baseNotes: '', image: '', video: '', status: 'In Stock',
-  sizes: [{ label: '50ml', price: 0, discountPrice: null, stock: 10 }] as Size[],
-  images: [] as string[],
-  categoryId: null as number | null,
-  brandId: null as number | null,
-  familyIds: [] as number[],
-  collectionIds: [] as number[],
-};
+function productToFormValues(p: Product): ProductFormValues {
+  return {
+    id: p.id,
+    name: p.name,
+    code: p.code,
+    slug: p.slug,
+    brand: p.brand, brandId: p.brandId,
+    category: p.category, categoryId: p.categoryId,
+    gender: p.gender,
+    status: p.status,
+    draft: p.draft,
+    description: p.description,
+    familyIds: [...(p.familyIds ?? [])],
+    newFamilyNames: [],
+    topNotes: p.topNotes, middleNotes: p.middleNotes, baseNotes: p.baseNotes,
+    concentration: p.concentration, longevity: p.longevity, sillage: p.sillage, season: p.season, occasion: p.occasion,
+    images: p.images?.length ? [...p.images] : (p.image ? [p.image] : []),
+    image: p.image,
+    video: p.video,
+    sizes: p.sizes.length ? [...p.sizes] : [{ label: '50ml', price: 0, discountPrice: null, stock: 0 }],
+    collectionIds: [...(p.collectionIds ?? [])],
+    seoTitle: p.seoTitle, seoDescription: p.seoDescription, metaKeywords: p.metaKeywords,
+  };
+}
 
 export default function DashboardClient() {
   const [tab, setTab] = useState<Tab>('Dashboard');
@@ -61,9 +77,8 @@ export default function DashboardClient() {
   const [reviewsList, setReviewsList] = useState<Review[]>([]);
   const [settingsMap, setSettingsMap] = useState<Record<string, string>>({});
   const [tax, setTax] = useState<Taxonomies>({ categories: [], brands: [], families: [], collections: [] });
-  const [form, setForm] = useState<typeof emptyForm>({ ...emptyForm });
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [productFormOpen, setProductFormOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<ProductFormValues | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
   const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
 
@@ -87,66 +102,37 @@ export default function DashboardClient() {
   useEffect(() => { loadAll(); }, [loadAll]);
 
   /* ---------- Products ---------- */
-  const resetForm = () => {
-    setForm({ ...emptyForm, sizes: [{ label: '50ml', price: 0, discountPrice: null, stock: 10 }], images: [], familyIds: [], collectionIds: [] });
-    setEditingId(null);
-  };
-
-  // Unlimited image uploads — each appends to the gallery
-  const uploadImage = async (files: FileList) => {
-    setUploading(true);
-    try {
-      for (const file of Array.from(files).slice(0, 10)) {
-        const fd = new FormData();
-        fd.append('file', file);
-        const res = await fetch('/api/upload', { method: 'POST', body: fd });
-        const data = await res.json();
-        if (res.ok) setForm(f => ({ ...f, images: [...f.images, data.url], image: f.images.length === 0 ? data.url : f.image }));
-        else toast.error(data.error || 'Upload failed');
-      }
-      toast.success('HD image(s) uploaded');
-    } catch { toast.error('Upload failed'); }
-    finally { setUploading(false); }
-  };
-
-  const toggleId = (key: 'familyIds' | 'collectionIds', id: number) =>
-    setForm(f => ({ ...f, [key]: f[key].includes(id) ? f[key].filter(x => x !== id) : [...f[key], id] }));
-
-  const saveProduct = async () => {
-    if (!form.name.trim()) { toast.error('Product name is required'); return; }
-    if (!form.sizes.some(sz => sz.label && sz.price > 0)) { toast.error('Add at least one size with a price'); return; }
-    const method = editingId ? 'PUT' : 'POST';
-    const url = editingId ? `/api/products/${editingId}` : '/api/products';
-    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
-    const data = await res.json();
-    if (!res.ok) { toast.error(data.error || 'Save failed'); return; }
-    toast.success(editingId ? 'Product updated — live on the website' : `Published! Code: ${data.product.code}`);
-    resetForm();
-    loadAll();
+  const openNewProduct = () => {
+    setEditingProduct(emptyProductForm());
+    setProductFormOpen(true);
   };
 
   const editProduct = (p: Product) => {
-    setEditingId(p.id);
-    setForm({
-      name: p.name, brand: p.brand, category: p.category, gender: p.gender, fragranceFamily: p.fragranceFamily,
-      description: p.description, topNotes: p.topNotes, middleNotes: p.middleNotes, baseNotes: p.baseNotes,
-      image: p.image, video: p.video, status: p.status, sizes: p.sizes.length ? [...p.sizes] : [{ label: '50ml', price: 0, discountPrice: null, stock: 0 }],
-      images: p.images?.length ? [...p.images] : (p.image ? [p.image] : []),
-      categoryId: p.categoryId, brandId: p.brandId,
-      familyIds: [...(p.familyIds ?? [])], collectionIds: [...(p.collectionIds ?? [])],
-    });
+    setEditingProduct(productToFormValues(p));
+    setProductFormOpen(true);
     setTab('Products');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const closeProductForm = () => {
+    setProductFormOpen(false);
+    setEditingProduct(null);
+  };
+
+  const onProductSaved = () => {
+    closeProductForm();
+    loadAll();
   };
 
   const deleteProduct = async (id: number) => {
     if (!confirm('Delete this product permanently?')) return;
     const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
-    if (res.ok) { toast.success('Product deleted'); if (editingId === id) resetForm(); loadAll(); }
-    else toast.error('Delete failed');
+    if (res.ok) {
+      toast.success('Product deleted');
+      if (editingProduct?.id === id) closeProductForm();
+      loadAll();
+    } else toast.error('Delete failed');
   };
-
-  const setSize = (i: number, patch: Partial<Size>) => setForm(f => ({ ...f, sizes: f.sizes.map((sz, idx) => idx === i ? { ...sz, ...patch } : sz) }));
 
   /* ---------- Orders ---------- */
   const updateOrderStatus = async (id: number, status: string) => {
@@ -193,7 +179,6 @@ export default function DashboardClient() {
     validOrders.flatMap(o => o.items).reduce<Record<string, number>>((acc, it) => { acc[it.name] = (acc[it.name] ?? 0) + it.quantity; return acc; }, {})
   ).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const mostViewed = [...products].sort((a, b) => b.views - a.views).slice(0, 5);
-  // Last 7 days revenue bars
   const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - (6 - i)); return d; });
   const dailyRevenue = days.map(d => validOrders.filter(o => new Date(o.createdAt).toDateString() === d.toDateString()).reduce((s, o) => s + o.total, 0));
   const maxDaily = Math.max(...dailyRevenue, 1);
@@ -248,7 +233,6 @@ export default function DashboardClient() {
             </div>
 
             <div className="grid lg:grid-cols-2 gap-6">
-              {/* Revenue chart */}
               <div className="bg-zinc-900 rounded-3xl p-8 border border-white/10">
                 <div className="text-sm tracking-widest text-white/60 mb-6">REVENUE — LAST 7 DAYS</div>
                 <div className="flex items-end gap-3 h-40">
@@ -260,7 +244,6 @@ export default function DashboardClient() {
                   ))}
                 </div>
               </div>
-              {/* Top selling */}
               <div className="bg-zinc-900 rounded-3xl p-8 border border-white/10">
                 <div className="text-sm tracking-widest text-white/60 mb-6">TOP SELLING PRODUCTS</div>
                 {topProducts.length === 0 ? <div className="text-white/40 text-sm">No sales yet.</div> : topProducts.map(([name, qty], i) => (
@@ -292,129 +275,24 @@ export default function DashboardClient() {
 
         {/* ============ PRODUCTS ============ */}
         {tab === 'Products' && (
-          <div className="grid xl:grid-cols-12 gap-8">
-            <div className="xl:col-span-5 bg-zinc-900 border border-white/10 rounded-3xl p-8 h-fit">
-              <div className="flex justify-between items-center mb-6">
-                <div className="serif-heading text-2xl">{editingId ? 'Edit Product' : 'New Product'}</div>
-                {editingId && <button onClick={resetForm} className="text-xs px-4 py-2 border border-white/30 rounded-2xl">CANCEL</button>}
-              </div>
+          <div className="space-y-8">
+            {productFormOpen && editingProduct ? (
+              <ProductForm
+                tax={tax}
+                initial={editingProduct}
+                isEditing={editingProduct.id != null}
+                onSaved={onProductSaved}
+                onCancel={closeProductForm}
+                onDelete={editingProduct.id != null ? () => deleteProduct(editingProduct.id as number) : undefined}
+              />
+            ) : (
+              <button onClick={openNewProduct}
+                className="w-full py-6 border border-dashed border-white/20 hover:border-amber-400 rounded-3xl flex items-center justify-center gap-3 text-sm text-white/60 hover:text-amber-300 transition">
+                <Plus size={18} /> ADD NEW PRODUCT
+              </button>
+            )}
 
-              {/* Unlimited image gallery */}
-              <div className="mb-6">
-                <div onClick={() => document.getElementById('hd-up')?.click()}
-                  className="border border-dashed border-white/30 hover:border-amber-400 h-40 rounded-3xl flex flex-col items-center justify-center cursor-pointer relative overflow-hidden">
-                  {form.images[0] ? <img src={form.images[0]} className="absolute inset-0 w-full h-full object-cover opacity-60" alt="" /> : null}
-                  <div className="relative z-10 text-center">
-                    <Upload size={30} className="text-amber-400 mb-2 mx-auto" />
-                    <div className="text-sm">{uploading ? 'Uploading...' : 'Upload HD Images (unlimited)'}</div>
-                    <div className="text-xs text-white/50 mt-1">JPG, PNG, WebP • Max 8MB each • Select multiple</div>
-                  </div>
-                  <input id="hd-up" type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={e => e.target.files?.length && uploadImage(e.target.files)} />
-                </div>
-                {form.images.length > 0 && (
-                  <div className="flex gap-2 mt-3 flex-wrap">
-                    {form.images.map((img, i) => (
-                      <div key={i} className="relative group">
-                        <img src={img} className={`w-14 h-14 rounded-xl object-cover border-2 ${i === 0 ? 'border-amber-400' : 'border-white/10'}`} alt="" />
-                        <button onClick={() => setForm(f => ({ ...f, images: f.images.filter((_, idx) => idx !== i), image: i === 0 ? (f.images[1] ?? '') : f.image }))}
-                          className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-5 h-5 text-[10px] opacity-0 group-hover:opacity-100 transition">✕</button>
-                        {i === 0 && <div className="absolute bottom-0 inset-x-0 bg-amber-400 text-black text-[8px] text-center rounded-b-lg">MAIN</div>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-4">
-                <input placeholder="Product Name *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="w-full bg-black border border-white/15 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:border-amber-400" />
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest text-white/50 block mb-1">Brand</label>
-                    <select value={form.brandId ?? ''} onChange={e => { const id = e.target.value ? Number(e.target.value) : null; setForm(f => ({ ...f, brandId: id, brand: tax.brands.find(b => b.id === id)?.name ?? '' })); }}
-                      className="w-full bg-black border border-white/15 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-amber-400">
-                      <option value="">— Select brand —</option>
-                      {tax.brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest text-white/50 block mb-1">Category (one only)</label>
-                    <select value={form.categoryId ?? ''} onChange={e => { const id = e.target.value ? Number(e.target.value) : null; setForm(f => ({ ...f, categoryId: id, category: tax.categories.find(c => c.id === id)?.name ?? '' })); }}
-                      className="w-full bg-black border border-white/15 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-amber-400">
-                      <option value="">— Select category —</option>
-                      {tax.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <select value={form.gender} onChange={e => setForm(f => ({ ...f, gender: e.target.value }))} className="bg-black border border-white/15 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-amber-400">
-                    {['Unisex', 'Men', 'Women'].map(g => <option key={g}>{g}</option>)}
-                  </select>
-                  <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} className="bg-black border border-white/15 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-amber-400">
-                    {PRODUCT_STATUSES.map(st => <option key={st}>{st}</option>)}
-                  </select>
-                </div>
-
-                {/* Fragrance families multi-select */}
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest text-white/50 block mb-2">Fragrance Families (multi-select)</label>
-                  <div className="flex flex-wrap gap-2">
-                    {tax.families.filter(fm => fm.enabled).map(fm => (
-                      <button key={fm.id} type="button" onClick={() => toggleId('familyIds', fm.id)}
-                        className={`px-4 py-2 rounded-full text-xs border transition ${form.familyIds.includes(fm.id) ? 'bg-amber-400 text-black border-amber-400 font-medium' : 'border-white/20 text-white/60 hover:border-white/50'}`}>
-                        {form.familyIds.includes(fm.id) ? '✓ ' : ''}{fm.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Collections multi-select */}
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest text-white/50 block mb-2">Collections (drive homepage sections)</label>
-                  <div className="flex flex-wrap gap-2">
-                    {tax.collections.filter(c => c.enabled).map(c => (
-                      <button key={c.id} type="button" onClick={() => toggleId('collectionIds', c.id)}
-                        className={`px-4 py-2 rounded-full text-xs border transition ${form.collectionIds.includes(c.id) ? 'bg-sky-400 text-black border-sky-400 font-medium' : 'border-white/20 text-white/60 hover:border-white/50'}`}>
-                        {form.collectionIds.includes(c.id) ? '✓ ' : ''}{c.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <textarea placeholder="Description" rows={3} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className="w-full bg-black border border-white/15 rounded-3xl px-5 py-4 text-sm focus:outline-none focus:border-amber-400 resize-none" />
-                <div className="grid grid-cols-3 gap-3">
-                  <input placeholder="Top Notes" value={form.topNotes} onChange={e => setForm(f => ({ ...f, topNotes: e.target.value }))} className="bg-black border border-white/15 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-amber-400" />
-                  <input placeholder="Middle Notes" value={form.middleNotes} onChange={e => setForm(f => ({ ...f, middleNotes: e.target.value }))} className="bg-black border border-white/15 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-amber-400" />
-                  <input placeholder="Base Notes" value={form.baseNotes} onChange={e => setForm(f => ({ ...f, baseNotes: e.target.value }))} className="bg-black border border-white/15 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-amber-400" />
-                </div>
-                <input placeholder="Video URL (optional)" value={form.video} onChange={e => setForm(f => ({ ...f, video: e.target.value }))} className="w-full bg-black border border-white/15 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:border-amber-400" />
-
-                {/* Unlimited sizes */}
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <div className="text-xs tracking-widest text-white/60">SIZES, PRICES & STOCK</div>
-                    <button onClick={() => setForm(f => ({ ...f, sizes: [...f.sizes, { label: '', price: 0, discountPrice: null, stock: 0 }] }))} className="text-xs text-amber-400 flex items-center gap-1"><Plus size={13} /> ADD SIZE</button>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-[1fr_1fr_1fr_0.8fr_0.8fr_32px] gap-2 text-[9px] text-white/40 uppercase px-1"><span>Size</span><span>Price</span><span>Discount</span><span>Stock</span><span>Weight</span><span></span></div>
-                    {form.sizes.map((sz, i) => (
-                      <div key={i} className="grid grid-cols-[1fr_1fr_1fr_0.8fr_0.8fr_32px] gap-2">
-                        <input placeholder="50ml" value={sz.label} onChange={e => setSize(i, { label: e.target.value })} className="bg-black border border-white/15 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
-                        <input type="number" placeholder="0" value={sz.price || ''} onChange={e => setSize(i, { price: Number(e.target.value) })} className="bg-black border border-white/15 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
-                        <input type="number" placeholder="—" value={sz.discountPrice ?? ''} onChange={e => setSize(i, { discountPrice: e.target.value ? Number(e.target.value) : null })} className="bg-black border border-white/15 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
-                        <input type="number" placeholder="0" value={sz.stock ?? ''} onChange={e => setSize(i, { stock: Number(e.target.value) })} className="bg-black border border-white/15 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
-                        <input placeholder="opt." value={sz.weight ?? ''} onChange={e => setSize(i, { weight: e.target.value })} className="bg-black border border-white/15 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
-                        <button onClick={() => setForm(f => ({ ...f, sizes: f.sizes.filter((_, idx) => idx !== i) }))} className="text-rose-400 hover:bg-rose-500/10 rounded-xl"><X size={15} className="mx-auto" /></button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <button onClick={saveProduct} className="w-full py-5 bg-gradient-to-r from-amber-400 to-yellow-500 text-black rounded-3xl font-medium flex items-center justify-center gap-3 text-sm tracking-widest hover:brightness-110 active:scale-[0.98] transition">
-                  <Save size={18} /> {editingId ? 'UPDATE — GOES LIVE INSTANTLY' : 'PUBLISH TO WEBSITE'}
-                </button>
-              </div>
-            </div>
-
-            <div className="xl:col-span-7">
+            <div>
               <div className="text-2xl serif-heading mb-5">Inventory • {products.length} products</div>
               <div className="bg-zinc-900 rounded-3xl overflow-hidden border border-white/10 overflow-x-auto">
                 <table className="w-full min-w-[640px]">
@@ -427,7 +305,13 @@ export default function DashboardClient() {
                         <td className="pl-6 py-4">
                           <div className="flex items-center gap-3">
                             <img src={p.image || '/images/noir-oud.jpg'} className="w-12 h-12 rounded-xl object-cover border border-white/10" alt="" />
-                            <div><div className="font-medium">{p.name}</div><div className="text-xs text-white/40">{p.brand}</div></div>
+                            <div>
+                              <div className="font-medium flex items-center gap-2">
+                                {p.name}
+                                {p.draft && <span className="text-[9px] px-2 py-0.5 rounded-full bg-white/10 text-white/50">DRAFT</span>}
+                              </div>
+                              <div className="text-xs text-white/40">{p.brand}</div>
+                            </div>
                           </div>
                         </td>
                         <td className="font-mono text-amber-400 text-xs">{p.code}</td>
@@ -453,7 +337,7 @@ export default function DashboardClient() {
                   </tbody>
                 </table>
               </div>
-              <div className="text-[10px] text-white/30 mt-4 text-center">Stock deducts automatically on every order. Zero stock → auto “Out of Stock” (unless Coming Soon). Customers never see stock numbers.</div>
+              <div className="text-[10px] text-white/30 mt-4 text-center">Stock deducts automatically on every order. Zero stock → auto "Out of Stock" (unless Coming Soon). Customers never see stock numbers.</div>
             </div>
           </div>
         )}
@@ -544,7 +428,7 @@ export default function DashboardClient() {
           </div>
         )}
 
-        {/* ============ CATALOG: categories, brands, families, collections ============ */}
+        {/* ============ CATALOG ============ */}
         {tab === 'Catalog' && (
           <div>
             <div className="text-2xl serif-heading mb-2">Catalog Management</div>
@@ -576,7 +460,6 @@ export default function DashboardClient() {
               </button>
             </div>
 
-            {/* Feature toggles */}
             <div className="bg-zinc-900 border border-white/10 rounded-3xl p-8 mb-6">
               <div className="text-sm tracking-widest text-amber-400 mb-6">FEATURE TOGGLES</div>
               <div className="grid md:grid-cols-3 gap-4">

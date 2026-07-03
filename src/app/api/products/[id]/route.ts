@@ -3,7 +3,17 @@ import { db } from "@/db";
 import { products } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { SESSION_COOKIE, verifySession } from "@/lib/admin-auth";
-import { clean, parseSizes, parseIds, parseImages, syncJunctions } from "@/lib/product-utils";
+import {
+  clean,
+  parseSizes,
+  parseIds,
+  parseImages,
+  syncJunctions,
+  resolveBrand,
+  resolveCategory,
+  resolveFamilyIds,
+  generateUniqueSlug,
+} from "@/lib/product-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -54,8 +64,11 @@ export async function PUT(
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 
+  const name = clean(body.name, 140);
   const sizes = parseSizes(body.sizes);
-  if (sizes.length === 0) {
+  const isDraft = body.draft === true;
+
+  if (!isDraft && sizes.length === 0) {
     return NextResponse.json(
       { error: "At least one size with a price is required." },
       { status: 400 }
@@ -63,33 +76,54 @@ export async function PUT(
   }
 
   const images = parseImages(body.images);
+  const brand = await resolveBrand(body.brandId, body.brand);
+  const category = await resolveCategory(body.categoryId, body.category);
+
+  // Only regenerate the slug if the admin explicitly changed the name or slug field.
+  const requestedSlug = clean(body.slug, 160);
+  const slug = requestedSlug
+    ? await generateUniqueSlug(requestedSlug, productId)
+    : name
+    ? await generateUniqueSlug(name, productId)
+    : undefined;
 
   const [updated] = await db
     .update(products)
     .set({
-      name: clean(body.name, 140),
-      brand: clean(body.brand, 80),
-      category: clean(body.category, 60),
+      name,
+      ...(slug ? { slug } : {}),
+      brand: brand.name,
+      brandId: brand.id,
+      category: category.name,
+      categoryId: category.id,
       gender: clean(body.gender, 20) || "Unisex",
       fragranceFamily: clean(body.fragranceFamily, 80),
       description: clean(body.description, 3000),
       topNotes: clean(body.topNotes, 200),
       middleNotes: clean(body.middleNotes, 200),
       baseNotes: clean(body.baseNotes, 200),
+      concentration: clean(body.concentration, 40),
+      longevity: clean(body.longevity, 40),
+      sillage: clean(body.sillage, 40),
+      season: clean(body.season, 60),
+      occasion: clean(body.occasion, 60),
       image: images[0] ?? String(body.image ?? "").slice(0, 100000),
       images,
       video: String(body.video ?? "").slice(0, 1000),
       status: clean(body.status, 30) || "In Stock",
+      draft: isDraft,
       sizes,
-      categoryId: body.categoryId ? Number(body.categoryId) : null,
-      brandId: body.brandId ? Number(body.brandId) : null,
+      seoTitle: clean(body.seoTitle, 160),
+      seoDescription: clean(body.seoDescription, 300),
+      metaKeywords: clean(body.metaKeywords, 300),
     })
     .where(eq(products.id, productId))
     .returning();
 
   if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  await syncJunctions(productId, parseIds(body.familyIds), parseIds(body.collectionIds));
+  const familyIds = await resolveFamilyIds(body.familyIds, body.newFamilyNames);
+  await syncJunctions(productId, familyIds, parseIds(body.collectionIds));
 
   return NextResponse.json({ product: updated });
 }

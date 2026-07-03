@@ -3,7 +3,17 @@ import { db } from "@/db";
 import { products, productFamilies, productCollections } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { SESSION_COOKIE, verifySession } from "@/lib/admin-auth";
-import { clean, parseSizes, parseIds, parseImages, syncJunctions } from "@/lib/product-utils";
+import {
+  clean,
+  parseSizes,
+  parseIds,
+  parseImages,
+  syncJunctions,
+  resolveBrand,
+  resolveCategory,
+  resolveFamilyIds,
+  generateUniqueSlug,
+} from "@/lib/product-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -38,10 +48,13 @@ export async function POST(request: NextRequest) {
 
   const name = clean(body.name, 140);
   const sizes = parseSizes(body.sizes);
+  const isDraft = body.draft === true;
+
   if (name.length < 2) {
     return NextResponse.json({ error: "Product name is required." }, { status: 400 });
   }
-  if (sizes.length === 0) {
+  // Drafts can be saved incomplete; published products need at least one priced size.
+  if (!isDraft && sizes.length === 0) {
     return NextResponse.json(
       { error: "At least one size with a price is required." },
       { status: 400 }
@@ -49,26 +62,39 @@ export async function POST(request: NextRequest) {
   }
 
   const images = parseImages(body.images);
+  const brand = await resolveBrand(body.brandId, body.brand);
+  const category = await resolveCategory(body.categoryId, body.category);
+  const slug = await generateUniqueSlug(name);
 
   const [inserted] = await db
     .insert(products)
     .values({
       name,
-      brand: clean(body.brand, 80),
-      category: clean(body.category, 60),
+      slug,
+      brand: brand.name,
+      brandId: brand.id,
+      category: category.name,
+      categoryId: category.id,
       gender: clean(body.gender, 20) || "Unisex",
       fragranceFamily: clean(body.fragranceFamily, 80),
       description: clean(body.description, 3000),
       topNotes: clean(body.topNotes, 200),
       middleNotes: clean(body.middleNotes, 200),
       baseNotes: clean(body.baseNotes, 200),
+      concentration: clean(body.concentration, 40),
+      longevity: clean(body.longevity, 40),
+      sillage: clean(body.sillage, 40),
+      season: clean(body.season, 60),
+      occasion: clean(body.occasion, 60),
       image: images[0] ?? String(body.image ?? "").slice(0, 100000),
       images,
       video: String(body.video ?? "").slice(0, 1000),
       status: clean(body.status, 30) || "In Stock",
+      draft: isDraft,
       sizes,
-      categoryId: body.categoryId ? Number(body.categoryId) : null,
-      brandId: body.brandId ? Number(body.brandId) : null,
+      seoTitle: clean(body.seoTitle, 160),
+      seoDescription: clean(body.seoDescription, 300),
+      metaKeywords: clean(body.metaKeywords, 300),
     })
     .returning();
 
@@ -79,7 +105,8 @@ export async function POST(request: NextRequest) {
     .where(eq(products.id, inserted.id))
     .returning();
 
-  await syncJunctions(inserted.id, parseIds(body.familyIds), parseIds(body.collectionIds));
+  const familyIds = await resolveFamilyIds(body.familyIds, body.newFamilyNames);
+  await syncJunctions(inserted.id, familyIds, parseIds(body.collectionIds));
 
   return NextResponse.json({ product: updated }, { status: 201 });
 }
