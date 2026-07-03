@@ -75,12 +75,21 @@ export default function ProductForm({ tax, initial, isEditing, onSaved, onCancel
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  // Tracks the id of the product once it's been created on the server —
+  // needed because `isEditing` (a prop) never changes mid-session, so without
+  // this, every autosave/publish after the first would POST a brand-new
+  // product instead of updating the one already created.
+  const [createdId, setCreatedId] = useState<number | null>(initial.id ?? null);
+  const savingRef = useRef(false);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialJson = useRef(JSON.stringify(initial));
+
+  const effectiveIsEditing = isEditing || createdId !== null;
 
   useEffect(() => {
     setForm(initial);
     initialJson.current = JSON.stringify(initial);
+    setCreatedId(initial.id ?? null);
     setDirty(false);
   }, [initial]);
 
@@ -158,14 +167,23 @@ export default function ProductForm({ tax, initial, isEditing, onSaved, onCancel
 
   const submit = async (draft: boolean) => {
     if (!validate(draft)) return;
+    if (savingRef.current) return; // an autosave or another submit is already in flight
+    savingRef.current = true;
     setSaving(true);
     try {
-      const method = isEditing ? 'PUT' : 'POST';
-      const url = isEditing ? `/api/products/${form.id}` : '/api/products';
+      const editingNow = effectiveIsEditing;
+      const method = editingNow ? 'PUT' : 'POST';
+      const url = editingNow ? `/api/products/${createdId ?? form.id}` : '/api/products';
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildPayload(draft)) });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || 'Save failed'); return; }
-      toast.success(draft ? 'Draft saved' : isEditing ? 'Product updated — live on the website' : `Published! Code: ${data.product.code}`);
+      if (!editingNow && data.product?.id) {
+        // First successful save of a new product — remember its id so every
+        // save after this one updates it instead of creating a duplicate.
+        setCreatedId(data.product.id);
+        setForm(f => ({ ...f, id: data.product.id, code: data.product.code ?? f.code }));
+      }
+      toast.success(draft ? 'Draft saved' : editingNow ? 'Product updated — live on the website' : `Published! Code: ${data.product.code}`);
       setDirty(false);
       initialJson.current = JSON.stringify(form);
       onSaved();
@@ -173,22 +191,33 @@ export default function ProductForm({ tax, initial, isEditing, onSaved, onCancel
       toast.error('Save failed — check your connection');
     } finally {
       setSaving(false);
+      savingRef.current = false;
     }
   };
 
   const saveDraftSilently = async () => {
     if (!form.name.trim()) return; // nothing meaningful to save yet
+    if (savingRef.current) return; // don't autosave while a save is already in flight
+    savingRef.current = true;
     try {
-      const method = isEditing ? 'PUT' : 'POST';
-      const url = isEditing ? `/api/products/${form.id}` : '/api/products';
+      const editingNow = effectiveIsEditing;
+      const method = editingNow ? 'PUT' : 'POST';
+      const url = editingNow ? `/api/products/${createdId ?? form.id}` : '/api/products';
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildPayload(true)) });
+      const data = await res.json();
       if (res.ok) {
+        if (!editingNow && data.product?.id) {
+          setCreatedId(data.product.id);
+          setForm(f => ({ ...f, id: data.product.id, code: data.product.code ?? f.code }));
+        }
         setLastSavedAt(new Date());
         setDirty(false);
         initialJson.current = JSON.stringify(form);
       }
     } catch {
       // silent — autosave failures shouldn't interrupt the admin
+    } finally {
+      savingRef.current = false;
     }
   };
 
