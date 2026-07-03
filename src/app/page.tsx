@@ -452,26 +452,21 @@ export default function TheScentAtelier() {
                   <button onClick={(e) => { e.stopPropagation(); toggleWishlist(product.id); }} className="absolute top-5 left-5 w-9 h-9 bg-black/60 hover:bg-black rounded-2xl flex items-center justify-center text-white transition-all">
                     <Heart className={`w-4 h-4 ${wishlist.includes(product.id) ? 'fill-red-500 text-red-500' : ''}`} />
                   </button>
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black h-32"></div>
-                  <div className="absolute bottom-5 left-5 right-5">
-                    <div className="text-xs text-amber-400 mb-1 tracking-widest uppercase">{product.brand}</div>
-                    <div className="text-2xl serif-heading tracking-tight">{product.name}</div>
-                    <div className="text-xl font-light mt-1">From {fmt(minPrice(product))}</div>
-                  </div>
                 </div>
 
-                <div className="px-5 py-4 border-t border-white/10 text-sm">
+                <div className="px-5 pt-5">
+                  <div className="text-xs text-amber-400 mb-1 tracking-widest uppercase">{product.brand}</div>
+                  <div className="text-2xl serif-heading tracking-tight">{product.name}</div>
+                  <div className="text-xl font-light mt-1">From {fmt(minPrice(product))}</div>
+                </div>
+
+                <div className="px-5 py-4 text-sm">
                   <div className={`flex items-center gap-2 mb-3 text-xs ${inStock(product) ? 'text-emerald-400' : 'text-rose-400'}`}>
                     <div className="w-2 h-2 bg-current rounded-full animate-pulse"></div>{product.status}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={(e) => { e.stopPropagation(); openProduct(product); }} className="flex-1 bg-white text-black px-4 py-2.5 text-xs rounded-3xl hover:bg-amber-400 transition-all flex items-center justify-center gap-2 font-medium">
-                      <Plus size={14} /> SELECT SIZE
-                    </button>
-                    <button onClick={(e) => { e.stopPropagation(); whatsappInquiry(product); }} title="Inquire on WhatsApp" className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2.5 text-xs rounded-3xl transition-all flex items-center gap-2">
-                      {WA_ICON('w-4 h-4')} ASK
-                    </button>
-                  </div>
+                  <button onClick={(e) => { e.stopPropagation(); whatsappInquiry(product); }} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2.5 text-xs rounded-3xl transition-all flex items-center justify-center gap-2 font-medium">
+                    {WA_ICON('w-4 h-4')} INQUIRE ON WHATSAPP
+                  </button>
                 </div>
               </motion.div>
             ))}
